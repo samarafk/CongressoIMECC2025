@@ -1,0 +1,1109 @@
+---
+title: "Uma Jornada pelos TidyModels em R"
+author:
+- name: Samara Kiihl
+  affiliation: 
+  - Departamento de Estatística - IMECC - UNICAMP
+- name: Tatiana Benaglia
+  affiliation: Departamento de Estatística - IMECC - UNICAMP
+date: "10 a 11 de Julho de 2025"  
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float:
+        collapsed: true
+        smooth_scroll: true
+    toc_depth: 3
+vignette: >
+  %\VignetteIndexEntry{Vignette Title}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}  
+bibliography: refs.bib
+nocite: | 
+  @James2013
+  @hastie01statisticallearning
+  @kuhn2022tidy
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE)
+```
+
+# Introdução
+
+Este tutorial é parte no material do minicurso ministrado durante o [I Congresso do IMECC](https://congresso2025imecc.ime.unicamp.br).
+
+O código fonte deste material está disponível em <https://github.com/samarafk/CongressoIMECC2025>.
+
+Este tutorial ilustra um problema de classificação. Um tutorial com exemplo de regressão está disponível em <https://samarafk.github.io/sinape2024/>.
+
+
+
+# Conjunto de dados
+
+Os dados estão disponíveis no Kaggle: <https://www.kaggle.com/fmendes/diabetes-from-dat263x-lab01>. Faça o download do arquivo `diabetes.csv` e salve na mesma pasta do arquivo `.Rmd`. 
+
+Vamos carregar o pacote `tidyverse` e ler o conjunto de dados `diabetes`:
+
+```{r}
+library(tidyverse)
+diabetes <- read_csv("diabetes.csv")
+```
+
+Algumas informações rápidas dos dados:
+```{r}
+diabetes %>% glimpse()
+```
+
+Temos $n=`r nrow(diabetes)`$ observações. 
+
+Temos as seguintes variáveis:
+
+* `PatientID` - identificador de cada paciente
+
+* `Pregnancies`- número de gestações
+
+* `PlasmaGlucose` - concentração de glicose no plasma sanguíneo medida duas horas após a ingestão de glicose
+
+* `DiastolicBloodPressure` - pressão diastólica
+
+* `TricepsThickness` - espessura da prega cutânea do tríceps
+
+* `SerumInsulin` - nível de insulina circulante no soro medida duas horas após a ingestão de glicose.
+
+* `BMI` - IMC
+
+* `DiabetesPedigree` - representa uma pontuação de risco genético/familiar para diabetes mellitus (DM), baseada no histórico familiar do paciente.
+
+* `Age` - idade em anos
+
+* `Diabetic` - indicador de diabetes (1 se sim e 0 se não)
+
+As 10 primeiras observações:
+
+```{r}
+library(kableExtra)
+diabetes %>% head(10) %>% kable(booktabs = TRUE)
+```
+
+`PatientID` não será utilizada no modelo, portanto, vamos remover esta variável do conjunto de dados:
+
+```{r}
+
+diabetes <- diabetes %>% select(-PatientID)
+```
+
+A variável resposta é `Diabetic`. Para problemas em que o objetivo é classificação, `tidymodels` espera que a variável resposta seja `factor` e considera o primeiro nível como o evento de interesse.
+
+```{r}
+diabetes <- diabetes %>% 
+  mutate(Diabetic = factor(Diabetic))
+
+levels(diabetes$Diabetic)
+```
+
+Aqui, queremos que o evento de interesse seja `1`, que indica que o paciente é diabético, desta forma, usamos:
+
+```{r}
+diabetes <- diabetes %>% 
+  mutate(Diabetic = relevel(Diabetic, ref = "1"))
+
+levels(diabetes$Diabetic)
+```
+
+Algumas estatísticas sumárias:
+
+```{r}
+summary(diabetes)
+```
+
+# Data Splitting
+
+Agora vamos carregar o pacote `tidymodels` e separar os dados em duas partes.
+
+Para dividir os dados em conjuntos de treinamento e teste usamos a função `initial_split()`. Por padrão, a função separa 75\% dos dados para o treinamento e 25\% para o teste. Aqui, como exemplo, estamos usando 80\% para o treinamento e isso é especificado com `prop = 0.8`.
+
+A amostragem estratificada é feita através do argumento `strata`. A estratificação garante que os dados de teste mantenham uma distribuição próxima a dos dados de treinamento.
+
+Como a separação em treinamento e teste é feita de forma aleatorizada é importante usar `set.seed()` para garantirmos sempre a mesma divisão dos dados ao executarmos o código novamente:
+
+
+```{r}
+library(tidymodels)
+tidymodels_prefer()
+
+set.seed(1234)
+diabetes_split <- initial_split(diabetes, prop = 0.8, strata = Diabetic)
+```
+
+As funções `training()` e `testing()` são usadas para extrair os conjuntos de treinamento e teste, respectivamente:
+
+```{r}
+diabetes_train <- training(diabetes_split)
+diabetes_test <- testing(diabetes_split)
+```
+
+
+Mais detalhes sobre divisão do conjunto de dados em treinamento e teste são discutidos nos livros de @hastie01statisticallearning e @James2013.
+
+
+Podemos realizar análises exploratórias como de costume no conjunto de dados de treinamento. Por exemplo, qual é a distribuição da variável resposta para o conjunto de treinamento?
+
+
+```{r}
+diabetes_train %>% 
+  ggplot(aes(x = Diabetic)) +
+  geom_bar()
+```
+
+A distribuição etária é semelhante entre as diabéticos e não diabéticos?
+
+```{r}
+diabetes_train %>% 
+  ggplot(aes(x = Age, fill = Diabetic, group = Diabetic)) +
+  geom_density(position = "identity", alpha = .6)
+```
+
+
+A distribuição de `PlasmaGlucose` é semelhante entre as diabéticos e não diabéticos?
+
+```{r}
+diabetes_train %>% 
+  ggplot(aes(x = PlasmaGlucose, fill = Diabetic, group = Diabetic)) +
+  geom_density(position = "identity", alpha = .6)
+```
+
+
+Podemos usar também boxplot para avaliar a distribuição de `BMI` entre diabéticos e não diabéticos:
+
+```{r}
+diabetes_train %>%
+  ggplot(aes(x = Diabetic, y = BMI, fill = Diabetic)) +
+  geom_boxplot(alpha = 0.6) +
+  labs(x = "Diabetes", y = "Índice de Massa Corporal (BMI)") +
+  theme_minimal()
+```
+
+
+# Modelo
+
+No `tidymodels`, temos alguns passos para especificar um modelo:
+
+1) Escolha um modelo (*model*)
+2) Especifique um mecanismo (*engine*)
+3) Defina o modo (*mode*)
+
+
+
+Por exemplo, para especificar um modelo de regressão logística, usamos: 
+
+```{r}
+logistic_reg()
+```
+
+Depois que a forma funcional do modelo é especificada, é necessário pensar em um mecanismo/método para ajustar ou treinar o modelo, chamado de *engine*.
+
+
+```{r}
+args(logistic_reg)
+```
+
+
+Aqui vemos que o método *default* para `logistic_reg()` é `glm` (modelos lineares generalizados), mas outros modelos também estão disponíveis.
+
+
+Se quisermos ajustar um modelo de regressão logística via modelos lineares generalizados regularizados por *lasso* e *elastic-net*, podemos especificar através da *engine*:
+
+```{r}
+logistic_reg() %>% 
+   set_engine("glmnet") 
+```
+
+Todos os modelos disponíveis estão listados no site: <https://www.tidymodels.org/find/parsnip/>
+
+
+# Receitas
+
+![](https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRjo7Eog2YCkLVQ8gGiKW4IErbb-njsh3Z4IpPbRA2KVnpAiCXx0CONKgeDqlWQdfRICXc&usqp=CAU)
+
+Antes de proceder para o ajuste/treinamento do modelo, faz-se o pré-processamento dos dados, já que:
+
+- Alguns **modelos** exigem que os preditores tenham certas características ou certos formatos.
+
+- Algumas **variáveis** requerem algum tipo de transformação.
+
+Para isso, o `tidymodels` usa o que é chamado de receita (`recipe`).
+
+Uma primeira receita: 
+
+```{r}
+rec_simple <- recipe(Diabetic ~ ., data = diabetes_train)
+```
+
+No exemplo acima, a função `recipe()` apenas define a variável resposta e os preditores através da fórmula.
+
+
+```{r}
+rec_simple %>% summary() %>% kable(booktabs = TRUE)
+```
+
+
+Os passos de pré-processamento de uma receita usam os dados de treinamento para os cálculos. Tipos de cálculos no processamento:
+
+* Níveis de uma variável categórica
+* Avaliar se uma coluna tem variância nula (constante) - `step_zv()`
+* Calcular média e desvio-padrão para a normalização
+* Projetar os novos dados nas componentes principais obtidas pelos dados de treinamento.
+
+Um outro exemplo de receita:
+```{r}
+diabetes_rec <- recipe(Diabetic ~ ., data = diabetes_train) %>%
+  step_poly(Age, degree = 2)
+```
+
+
+A tabela a seguir apresenta os dados pré-processamos segundo a receita acima:
+```{r, echo=FALSE}
+kable_recipe <- function(rec) {
+  rec %>%
+    prep() %>%
+    juice() %>%
+    head(10) %>%
+    select(Diabetic, everything()) %>%
+    kableExtra::kable(booktabs = TRUE, digits = 3, linesep = "") %>%
+    kableExtra::kable_styling(font_size = 10)
+}
+
+kable_recipe(diabetes_rec)
+```
+
+
+# Workflow
+
+
+Gerenciar um modelo especificado com o `parsnip` (`model` + `engine` + `mode`) e os passos de pré-processamento usando `recipes`, pode ser um desafio.
+
+Para isso, o `tidymodels` propõe o uso da função `workflow()`, que possui dois argumentos opcionais:
+
+* `preprocessor`: pode ser uma fórmula ou uma receita
+* `spec`: modelo especificado com `parsnip`
+
+
+Vamos especificar um modelo de regressão logística:
+
+```{r}
+logreg_spec <- logistic_reg() %>%
+  set_engine("glm", family = "binomial") %>%
+  set_mode("classification")
+```
+
+A receita a ser aplicada está no objeto `diabetes_rec`.
+
+Vamos agregar essas duas informações no *workflow*:
+
+```{r}
+logreg_wf <- workflow(diabetes_rec, logreg_spec)
+```
+
+A função `fit()` pode ser usada para ajustar o modelo usando os dados de treinamento:
+
+```{r}
+logreg_fit <- logreg_wf %>% fit(data = diabetes_train)
+logreg_fit
+```
+
+
+A função `tidy()` do pacote `broom` resume as informações mais importantes de um modelo usando o conceito tidy:
+
+```{r}
+logreg_fit %>% tidy(conf.int = TRUE) %>% 
+  kable(booktabs = TRUE)
+```
+
+
+
+```{r}
+logreg_fit %>% tidy(conf.int = TRUE, exponentiate = TRUE) %>% 
+  kable(booktabs = TRUE)
+```
+
+A função `predict()` calcula os valores preditos para o conjunto especificado:
+
+```{r}
+logreg_fit %>% predict(diabetes_train)
+```
+
+
+
+A predição com `tidymodels` garante que:
+
+- as predições estarão sempre dentro de um dataframe/tibble;
+- os nomes e tipos das colunas são previsíveis e intuitivas;
+- o número de linhas em new_data e a saída são iguais.
+
+Pode-se usar também a função `augment()`, que calcula os valores preditos, adicionando-os em uma coluna no conjunto de dados especificado:
+
+
+```{r}
+logreg_fit %>% augment(diabetes_train)
+```
+
+  
+  
+  
+# Avaliar e comparar modelos
+
+Até aqui, fizemos o pré-processamento, definimos e treinamos o modelo escolhido usando os dados de treinamento.
+
+
+
+
+## Métricas
+
+Como avaliar se o modelo tem bom desempenho (foco em predição)?
+
+
+Olhar os resultados para cada observação não é produtivo:
+
+```{r}
+logreg_fit %>%
+  augment(new_data = diabetes_train) %>% 
+  head()
+```
+
+Temos algumas métricas para comparar os valores preditos com os observados (erro de predição):
+
+
+- **Matriz de Confusão**
+- **Acurácia**: $\frac{TP+TN}{TP+FP+FN+TN}$
+- **Sensibilidade**: $\frac{TP}{TP+FN}$
+- **Especificidade**: $\frac{TN}{FP+TN}$
+- **Brier score**: métrica para modelos de classificação, análoga ao erro quadrático médio em modelos de regressão $\frac{1}{n}\sum_{i=1}^n\sum_{k=1}^C(y_{ik}-\hat{p}_{ik})^2
+- **Kappa**: métrica semelhante à acurácia, mas ajustada para o acaso. Ela compara a acurácia observada com a acurácia esperada caso as previsões fossem feitas aleatoriamente, sendo especialmente útil quando há desequilíbrio nas classes (ex.: uma classe muito mais frequente que as outras).
+
+
+Dentro de `tidymodels` temos a função `metrics()` do pacote `yardstick` para avaliar o modelo. Temos que especificar os seguintes argumentos em `metrics()`:
+
+* `truth`: nome da variável com os valores observados da resposta
+* `estimate`: nome da variável contendo os valores preditos
+
+```{r}
+logreg_fit %>%
+  augment(new_data = diabetes_train) %>%
+  metrics(truth = Diabetic, estimate = .pred_class) %>% 
+  kable(booktabs = TRUE)
+```
+
+Podemos especificar apenas uma métrica:
+
+```{r}
+logreg_fit %>%
+  augment(new_data = diabetes_train) %>%
+  accuracy(truth = Diabetic, estimate = .pred_class) %>% 
+  kable(booktabs = TRUE)
+```
+
+
+Matriz de confusão de treinamento:
+
+```{r}
+logreg_fit %>%
+  augment(new_data = diabetes_train) %>%
+  conf_mat(truth = Diabetic, estimate = .pred_class)
+```
+
+Um gráfico ilustrando os resultados:
+
+```{r}
+logreg_fit %>%
+  augment(new_data = diabetes_train) %>%
+  conf_mat(truth = Diabetic, estimate = .pred_class) %>%
+  autoplot(type = "heatmap")
+```
+
+
+
+
+Também é possível especificar um conjunto de métricas. No exemplo a seguir, `diabetes_metrics` é definido como um conjunto de três métricas de interesse:
+
+```{r}
+diabetes_metrics <- metric_set(accuracy, sensitivity, specificity)
+```
+
+E podemos avaliar este conjunto de métricas no modelo ajustado: 
+```{r}
+augment(logreg_fit, new_data = diabetes_train) %>%
+  diabetes_metrics(truth = Diabetic, estimate = .pred_class) %>% 
+  kable(booktabs = TRUE)
+```
+
+
+Ao calcularmos as métricas tanto no conjunto de treinamento quanto no de teste, podemos avaliar se o modelo está super-ajustando (*overfitting*):
+
+
+::: columns
+::: {.column width="50%"}
+```{r}
+logreg_fit %>%
+  augment(diabetes_train) %>%
+  metrics(truth = Diabetic, estimate = .pred_class)
+```
+:::
+
+::: {.column width="50%"}
+```{r}
+logreg_fit %>%
+  augment(diabetes_test) %>%
+  metrics(truth = Diabetic, estimate = .pred_class) 
+```
+:::
+:::
+
+
+Essa métrica usa como corte a probabilidade `0.5` para declarar um evento (se a probabilidade estimada for acima de 0.5, declaramos Diabético = 1 e 0 caso contrário).
+
+
+E se decidirmos definir o corte como `0.8`? A variação desse limite afeta as métricas de sensibilidade e especificidade.
+
+
+
+Podemos usar a curva ROC (receiver operator characteristic):
+
+* x-axis: taxa de falso positivo (1 - especificidade)
+* y-axis: taxa de verdadeiro positivo (sensibilidade)
+
+portanto, temos um cenário com sensibilidade e especificidade calculadas em todos os limites possíveis.
+
+
+```{r}
+augment(logreg_fit, new_data = diabetes_train) %>% 
+  roc_curve(truth = Diabetic, .pred_1) %>% 
+    autoplot()
+```
+
+A area sob a curva ROC pode ser usada como métrica:
+
+```{r}
+augment(logreg_fit, new_data = diabetes_train) %>% 
+  roc_auc(truth = Diabetic, .pred_1) %>% 
+  kable(booktabs = TRUE)
+```
+
+e podemos fixar algumas linhas para visualizar os valores de corte (`threshold`) e seus respectivos TPR e FPR:
+
+```{r}
+augment(logreg_fit, new_data = diabetes_train) %>% 
+  roc_curve(truth = Diabetic, .pred_1) %>%
+  slice(1, 500, 1000, 2000, 4000, 6000, 8000, 10000) %>% 
+  kable(booktabs = TRUE)
+```
+
+
+## Validação Cruzada
+
+Usaremos 5 *folds* como exemplo. Para reamostrar os dados de treino, usaremos o comando `vfold_cv`:
+```{r}
+set.seed(234)
+diabetes_folds <- diabetes_train %>%
+                vfold_cv(v = 5, strata = Diabetic)
+diabetes_folds
+```
+
+Ajustando o modelo nas reamostragens:
+```{r}
+logreg_cv <- logreg_wf %>% fit_resamples(diabetes_folds)
+logreg_cv
+```
+
+A função `collect_metrics()` extrai as métricas obtidas em cada reamostra e calcula a métrica da validação, geralmente através de uma média:
+```{r}
+logreg_cv %>%
+  collect_metrics() %>% 
+  kable(booktabs = TRUE)
+```
+
+Para calcular um conjunto escolhido de métricas, é preciso especificar o conjunto no argumento `metrics` dentro de `fit_resamples`:
+```{r}
+logreg_cv <- fit_resamples(logreg_wf, 
+                 diabetes_folds,
+                 metrics = diabetes_metrics)
+
+logreg_cv %>%
+  collect_metrics() %>% 
+  kable(booktabs = TRUE)
+```
+
+Através da validação cruzada, avaliamos o desempenho do modelo apenas com os dados de treinamento, sem usar os dados de teste.
+
+
+A métrica obtida no conjunto de validação pode ser tomada como uma estimativa da métrica no conjunto de teste. 
+
+Caso seja necessário salvar as predições obtidas nas etapas de validação cruzada, para fazer um gráfico, por exemplo, usamos `control_resamples`:
+
+```{r}
+ctrl_malaria <- control_resamples(save_pred = TRUE)
+
+logreg_cv <- fit_resamples(logreg_wf, 
+               diabetes_folds, 
+               control = ctrl_malaria)
+
+logreg_preds <- collect_predictions(logreg_cv)
+logreg_preds
+```
+
+
+## Árvore de decisão
+
+Um outro modelo a ser considerado é árvore de decisão. Vamos considerar o seguinte exemplo:
+```{r}
+tree_spec <- decision_tree(cost_complexity = 0.005) %>%
+    set_mode("classification") %>%
+    set_engine("rpart", model = TRUE)
+tree_spec
+```
+
+O modelo de árvore de decisão não requer pré-processamento, de forma que podemos usar um `workflow` com a fórmula e o modelo especificado, por exemplo:
+```{r}
+tree_wf <- workflow(Diabetic ~ ., tree_spec)
+tree_wf
+```
+
+E ajustar com os dados de treinamento:
+```{r}
+tree_fit <- tree_wf %>% fit(data = diabetes_train)
+```  
+
+Visualização do modelo ajustado: 
+```{r}
+library(rpart.plot)
+
+tree_fit %>% 
+  extract_fit_engine() %>% 
+  rpart.plot()
+```
+
+Vamos então avaliar o desempenho da árvore de decisão através da validação cruzada:
+```{r}
+tree_cv <- tree_wf %>% fit_resamples(diabetes_folds)
+  
+tree_cv %>% collect_metrics() %>% 
+  kable(booktabs = TRUE)
+```  
+
+
+## Floresta Aleatória
+
+
+Podemos também considerar um modelo de floresta aleatória. 
+
+Aqui, usaremos `set_engine` e adicionaremos o argumento `importance = "impurity"`, para que possamos ter pontuações de importância variáveis, para avaliarmos quais preditores são mais relevantes.
+```{r}
+rf_spec <- rand_forest(trees = 1000) %>%
+    set_mode("classification") %>% 
+    set_engine("ranger", importance = "impurity")
+rf_spec
+```
+
+
+Um `workflow` simples:
+```{r}
+rf_wf <- workflow(Diabetic ~ ., rf_spec)
+rf_wf
+```
+Avaliação das métricas usando validação cruzada:
+```{r}
+set.seed(2024) #RF uses random numbers, so we need to set the seed
+rf_cv <- rf_wf %>% 
+  fit_resamples(diabetes_folds)
+
+rf_cv %>% collect_metrics() %>% 
+  kable(booktabs = TRUE)
+```
+
+
+## Conjunto de modelos
+
+Quando queremos comparar vários modelos ao mesmo tempo, é muito trabalhoso fazer um de cada vez, como mostramos anteriormente.
+
+`tidymodels` se mostra útil também nesta tarefa. Primeiro, podemos usar a função `workflow_set()` para gerar um conjunto de *workflows* que desejamos avaliar. Os argumentos desta função são:
+
+* `preproc`: formulas, recipes
+* `models`: models specified using `parsnip`
+ 
+Aqui, definimos um conjunto de *workflows* de interesse:
+```{r}
+wf_set <- workflow_set(preproc = list(rec1 = Diabetic ~ ., 
+                                      rec2 = diabetes_rec, 
+                                      rec1 = Diabetic ~ .),
+                       models = list(tree = tree_spec, 
+                                     logreg = logreg_spec, 
+                                     rf = rf_spec),
+                       cross = FALSE)
+```
+
+
+Para processar este conjunto de *workflows*, usamos a função `workflow_map()`. Podemos avaliar os modelos com as métricas desejadas usando a validação cruzada usando `fit_resamples`:
+```{r}
+wf_set %>%
+  workflow_map("fit_resamples", 
+               resamples = diabetes_folds,
+               metrics = diabetes_metrics,
+               seed = 2024) %>%
+  rank_results()
+```
+
+
+Se o argumento `cross = TRUE` o `workflow_set` faz um produto cruzado das receitas e modelos:
+```{r}
+workflow_set(preproc = list(rec1 = Diabetic ~ ., 
+                            rec2 = diabetes_rec),
+             models = list(tree = tree_spec, 
+                           logreg = logreg_spec, 
+                           rf = rf_spec),
+             cross = TRUE) %>%
+  workflow_map("fit_resamples", 
+               resamples = diabetes_folds,
+               metrics = diabetes_metrics,
+               seed = 2024) %>%
+  rank_results()
+```
+
+
+
+Suponha que o modelo de regressão logística tenha sido o escolhido.
+
+Vamos ajustar o modelo nos dados de treinamento e verificar o desempenho nos dados de teste.
+
+Vimos os comandos `fit()` e `predict()`/`augment()`, mas podemos usar a função `final_fit()`, que combina esses passos.
+
+```{r}
+final_fit <- last_fit(logreg_wf, 
+                      diabetes_split,
+                      metrics = diabetes_metrics) 
+```
+
+Lembre-se que o objeto `diabetes_split` tem informações sobre a separação dos dados originais em treino e teste.
+```{r}
+final_fit
+```
+
+Métricas calculadas para o conjunto de dados **teste**:
+```{r}
+collect_metrics(final_fit) 
+```
+
+Predições para o conjunto de dados **teste**:
+```{r}
+collect_predictions(final_fit) %>%
+  head()
+```
+
+Quais informações temos em `final_fit`? 
+```{r}
+extract_workflow(final_fit)
+```
+
+
+Quais as estimativas dos parâmetros do modelo final?
+```{r}
+final_fit %>% 
+  extract_fit_parsnip() %>% 
+  tidy()
+```
+
+# Hiperparâmetros (*tuning*)
+
+
+Algumas características dos modelos não podem ser estimadas diretamente dos dados.
+
+Escolhemos um modelo de regressão logística, por exemplo, e usamos os dados de treinamento para obter os parâmetros do modelo.
+
+No entanto, algumas escolhas são feitas antes do ajuste do modelo: usaremos alguma forma quadrática? interações? quais variáveis vamos considerar?
+
+Algumas decisões devem ser feitas na etapa *receita* e outras devem ser feitas *dentro do modelo*.
+
+Para ajuste fino, podemos testar *workflows* diferentes e avaliar o desempenho com validação cruzada.
+
+
+## Regressão logística com polinômio
+
+Para um modelo de regressão logística em que uma das variáveis, `Age`, será considerada através de um polinômio, temos a seguinte receita:
+```{r}
+#| code-line-numbers: "4"
+diabetes_rec <-
+  recipe(Diabetic ~ ., data = diabetes_train) %>%
+  step_poly(Age, degree = tune())
+```
+
+Repare que, acima, não especificamos diretamente o grau do polinômio. Vamos escolher o melhor hiperparâmetro usando a função `tune()`.
+
+Com a receita definida, vamos agregar as informações:
+```{r}
+logregpol_wf <- workflow(diabetes_rec, logreg_spec)
+logregpol_wf
+```
+
+A função `tune_grid()` calcula um conjunto de métricas usando validação cruzada para avaliar o desempenho em um conjunto pré-determinado de hiperparâmetros de um modelo ou de uma receita:
+```{r}
+logregpol_res <- tune_grid(logregpol_wf, 
+                           diabetes_folds, 
+                           grid = tibble(degree=1:5))
+logregpol_res
+```
+
+
+
+Apresentando os resultados (média dos 5 *folds*) para cada grau de polinômio (hiperparâmetro) considerado:
+```{r}
+collect_metrics(logregpol_res)
+```
+
+Visualização gráfica usando `autoplot()`:
+```{r}
+#| fig-align: 'center'
+autoplot(logregpol_res, metric = "accuracy")
+```
+
+Mostrando os melhores resultados:
+```{r}
+show_best(logregpol_res, 
+          metric = "accuracy", 
+          n = 3)
+```
+
+
+E se ajustarmos um outro modelo, também com algum outro hiperparâmetro? Como comparar?
+
+
+## LASSO
+
+Podemos ajustar uma regressão logística com regularização LASSO:
+```{r}
+logreglasso_spec <- logistic_reg(penalty = tune(), mixture = 1) %>%
+  set_engine("glmnet", family = "binomial") %>%
+  set_mode("classification")
+```
+
+`mixture = 1` especifica LASSO puro e o hiperparâmetro `penalty` será escolhido (ajuste fino) através da validação cruzada.
+
+
+Não consideraremos o polinômio para `Age` neste *workflow*, então podemos configurá-lo diretamente com a fórmula e o modelo especificado:
+```{r}
+logreglasso_wf <- workflow(Diabetic ~ ., logreglasso_spec)
+logreglasso_wf
+```
+
+Para avaliar o desempenho de múltiplos valores do hiperparâmetro usando validação cruzada:
+```{r}
+set.seed(2024)
+logreglasso_res <-
+  tune_grid(logreglasso_wf, 
+            resamples = diabetes_folds, 
+            grid = 20,
+            metrics = diabetes_metrics)
+```
+
+
+Métricas resultantes da validação cruzada considerando os valores do *grid*:
+```{r}
+logreglasso_res %>% collect_metrics()
+```
+
+
+```{r}
+autoplot(logreglasso_res)
+```
+
+
+The best result from cross-validation, considering the accuracy metric:
+```{r}
+show_best(logreglasso_res, metric = "accuracy", n = 1)
+```
+
+## Decision Tree
+
+Below is a *workflow* for a decision tree with hyperparameter (`cost_complexity`) tuning.
+
+First, the model is specified by including `tune()`:
+
+```{r}
+tree_spec <-
+  decision_tree(
+    cost_complexity = tune()
+  ) %>%
+  set_mode("classification") %>% 
+  set_engine("rpart", model = TRUE)
+```
+
+
+The *workflow*:
+```{r}
+tree_wf <- workflow(Diabetic ~ ., tree_spec) 
+```
+
+Let's use `tune_grid()` to evaluate multiple values for the hyperparameter:
+
+```{r}
+tree_res <-
+  tune_grid(tree_wf, 
+            resamples = diabetes_folds, 
+            grid = 30,
+            metrics = diabetes_metrics)
+```
+
+It is possible to provide a `data.frame` in the `grid` option, to be more specific.
+
+Metrics obtained through cross-validation considering the `grid` values:
+
+```{r}
+tree_res %>% collect_metrics()
+```
+
+```{r}
+autoplot(tree_res)
+```
+
+
+
+The best result from cross-validation, considering accuracy metric:
+```{r}
+show_best(tree_res, metric = "accuracy", n = 1)
+```
+
+
+## Random Forest
+
+
+A tuning parameter that is commonly chosen for random forest models is `mtry`, which is the number of predictors that will be randomly sampled at each split when creating the tree models. 
+
+For the `ranger` engine, the [default](https://parsnip.tidymodels.org/reference/details_rand_forest_ranger.html) is `floor(sqrt(ncol(x)))`.
+
+Let's use cross-validation to tune this parameter.
+
+We start by specifying the model and including `tune()`:
+
+```{r}
+rf_spec <- rand_forest(trees = 1000,
+                       mtry = tune()) %>%
+    set_mode("classification") %>% 
+    set_engine("ranger", importance = "impurity")
+rf_spec
+```
+
+The workflow:
+
+```{r}
+rf_wf <- workflow(Diabetic ~ ., rf_spec)
+rf_wf
+```
+
+
+Let's use `tune_grid()` to evaluate the performance for multiple values of the hyperparameter using cross-validation:
+
+```{r}
+set.seed(2024)
+rf_res <-
+  tune_grid(rf_wf, 
+            resamples = diabetes_folds, 
+            grid = 15,
+            metrics = diabetes_metrics)
+```
+
+
+Resulting metrics from cross-validation considering the grid values:
+
+```{r}
+rf_res %>% collect_metrics()
+```
+
+
+```{r}
+autoplot(rf_res)
+```
+
+
+The best result from cross-validation, considering the accuracy metric:
+```{r}
+show_best(rf_res, metric = "accuracy", n = 1)
+```
+
+## Fitting the chosen tuned model
+
+
+Let's assume, for instance, that between the four options (polynomial logistic regression, LASSO, decision tree and random forest), we decide to use the best tuned LASSO logistic regression. 
+
+We then need to select the model with the best performing hyperparameter, we do so by using the `select_best()` function:
+
+```{r}
+ best_acc <- select_best(logreglasso_res, metric = "accuracy")
+ best_acc
+```
+
+To adjust the final model, we take the desired workflow (`logregpol_wf` in this example) and use the function `finalize_workflow()` to specify the best performing hyperparameter. The function `last_fit()` fits this final model with the training data and evaluates the performance on the test data.
+
+```{r}
+final_lasso_fit <- logreglasso_wf %>% 
+   finalize_workflow(best_acc) %>%
+   last_fit(diabetes_split)
+final_lasso_fit
+```
+
+
+
+Results on test set:
+
+```{r}
+final_lasso_fit %>% collect_metrics()
+```
+
+
+
+For the selected final *workflow*, we can save all final adjustment steps (obtained using the training set):
+
+```{r}
+fitted_wf <- extract_workflow(final_lasso_fit)
+fitted_wf
+```
+
+Get predicted values for the test data:
+```{r}
+fitted_wf %>% augment(diabetes_test)
+```
+
+
+Results on the train set:
+
+```{r}
+fitted_wf %>% 
+  augment(diabetes_train) %>% 
+  metrics(truth = Diabetic, estimate = .pred_class)
+```
+
+To obtain the estimates of the model:
+
+```{r}
+final_lasso_fit %>%
+  extract_fit_parsnip() %>%
+  tidy() %>% 
+  kable(booktabs = TRUE)
+```
+
+
+
+
+## Everything Everywhere All at Once
+
+![](https://static1.colliderimages.com/wordpress/wp-content/uploads/2022/04/Everything-Everywhere-All-At-Once-Action-Movie-Climax-feature.jpg)
+
+
+We can define a set of workflows and then evaluate it using `tune_grid`.
+
+```{r}
+wf_tune_set <- workflow_set(preproc = list(rec1 = Diabetic ~ ., 
+                                           rec2 = diabetes_rec,
+                                           rec1 = Diabetic ~ .,
+                                           rec1 = Diabetic ~ .),
+                            models = list(tree = tree_spec, 
+                                          logreg = logreg_spec, 
+                                          rf = rf_spec,
+                                          lasso_log = logreglasso_spec),
+                            cross = FALSE)
+```
+
+
+```{r}
+set.seed(2024)
+wf_tune_res <-  wf_tune_set %>% 
+  workflow_map(resamples = diabetes_folds, 
+               grid = 40,
+               metrics = diabetes_metrics,
+               control = control_grid(save_pred = TRUE))
+```
+
+
+
+```{r}
+tune_results <- wf_tune_res %>% 
+  collect_metrics()
+tune_results
+```
+
+Vamos selecionar o *workflow* com melhor desempenho, considerando a acurácia:
+```{r}
+best_wf_id <- wf_tune_res %>% 
+  rank_results() %>% 
+  filter(.metric == "accuracy") %>%
+  arrange(desc(mean)) %>%
+  slice(1) %>%  # Select the best one
+  pull(wflow_id)
+
+best_wf_id
+```
+
+Então, podemos extrair o melhor *workflow* da seguinte forma:
+```{r}
+best_workflow <- wf_tune_set %>%
+  extract_workflow(best_wf_id)
+```
+
+Para finalizar o *workflow* selecionado fixando o hiperparâmetro com melhor desempenho:
+```{r}
+best_workflow_final <- best_workflow %>%
+  finalize_workflow(
+    wf_tune_res %>%
+      extract_workflow_set_result(best_wf_id) %>%
+      select_best(metric = "accuracy")
+  )
+best_workflow_final
+```
+
+
+```{r}
+final_wf_fit <-
+  best_workflow_final %>%
+  last_fit(diabetes_split,
+           metrics = diabetes_metrics)
+final_wf_fit
+```
+
+
+Resultados no conjunto teste:
+```{r }
+final_wf_fit %>% collect_metrics()
+```
+
+
+Para o *workflow* final selecionado, salvamos todas as etapas de ajuste final (obtidas usando o conjunto de treinamento):
+```{r}
+fitted_wf <- extract_workflow(final_wf_fit)
+fitted_wf
+```
+
+Valores preditos para o conjunto de teste:
+```{r}
+#predict(fitted_wf, diabetes_test[1:3,])
+final_wf_fit %>% augment()
+```
+
+*Workflow* final:
+```{r}
+fitted_wf %>% 
+  extract_fit_parsnip() 
+```
+
+
+Visualização da importância dos preditores:
+```{r}
+library(vip)
+final_wf_fit %>% 
+  extract_fit_parsnip() %>% 
+  vip(num_features = 10)
+```
+
+
+@Sharika2021 apresenta e discute a aplicação de outros algoritmos para este conjunto de dados. 
+
+
+
+# Referências
+
