@@ -40,10 +40,10 @@ Slides do minicurso ministrado durante o [I Congresso do IMECC](https://congress
 ## 📖 Tutoriais
 
 - [Tutorial de Regressão](Tutorial_TidyModels_Regressao.html)
-  <br><sub>Tutorial para ajuste de modelo supervisionado de regressão com os dados `abalone`.</sub>
+  <br>Tutorial para ajuste de modelo supervisionado de regressão com os dados `abalone`.
 
 - [Tutorial de Classificação](Tutorial_TidyModels_Classificacao.html)
-  <br><sub>Tutorial para ajuste de modelo supervisionado de classificação com dados sobre diabetes.</sub>
+  <br>Tutorial para ajuste de modelo supervisionado de classificação com dados sobre diabetes.
 
 ---
 
