@@ -23,6 +23,7 @@ nocite: |
   @James2013
   @hastie01statisticallearning
   @kuhn2022tidy
+  @Sharika2021
 ---
 
 ```{r setup, include=FALSE}
@@ -758,6 +759,7 @@ Apresentando os resultados (média dos 5 *folds*) para cada grau de polinômio (
 collect_metrics(logregpol_res)
 ```
 
+
 Visualização gráfica usando `autoplot()`:
 ```{r}
 #| fig-align: 'center'
@@ -815,17 +817,14 @@ autoplot(logreglasso_res)
 ```
 
 
-The best result from cross-validation, considering the accuracy metric:
+O melhor resultado da validação cruzada, considerando a métrica de precisão:
 ```{r}
 show_best(logreglasso_res, metric = "accuracy", n = 1)
 ```
 
-## Decision Tree
+## Árvore de decisão
 
-Below is a *workflow* for a decision tree with hyperparameter (`cost_complexity`) tuning.
-
-First, the model is specified by including `tune()`:
-
+Abaixo está um *workflow* para uma árvore de decisão com ajuste de hiperparâmetro (`cost_complexity`). Primeiramente, o modelo é especificado incluindo `tune()`:
 ```{r}
 tree_spec <-
   decision_tree(
@@ -836,13 +835,12 @@ tree_spec <-
 ```
 
 
-The *workflow*:
+O *workflow*:
 ```{r}
 tree_wf <- workflow(Diabetic ~ ., tree_spec) 
 ```
 
-Let's use `tune_grid()` to evaluate multiple values for the hyperparameter:
-
+Vamos usar `tune_grid()` para avaliar múltiplos valores para o hiperparâmetro:
 ```{r}
 tree_res <-
   tune_grid(tree_wf, 
@@ -851,9 +849,9 @@ tree_res <-
             metrics = diabetes_metrics)
 ```
 
-It is possible to provide a `data.frame` in the `grid` option, to be more specific.
+É possível fornecer um `data.frame` na opção `grid`, para ser mais específico.
 
-Metrics obtained through cross-validation considering the `grid` values:
+Métricas obtidas por meio de validação cruzada considerando os valores da `grade`:
 
 ```{r}
 tree_res %>% collect_metrics()
@@ -865,23 +863,22 @@ autoplot(tree_res)
 
 
 
-The best result from cross-validation, considering accuracy metric:
+O melhor resultado da validação cruzada, considerando a métrica de acurácia:
 ```{r}
 show_best(tree_res, metric = "accuracy", n = 1)
 ```
 
 
-## Random Forest
+## Floresta aleatória
 
 
-A tuning parameter that is commonly chosen for random forest models is `mtry`, which is the number of predictors that will be randomly sampled at each split when creating the tree models. 
+Um hiperparâmetro comumente escolhido para modelos de floresta aleatória é `mtry`, que é o número de preditores que serão amostrados aleatoriamente em cada bifurcação ao criar os modelos de árvore.
 
-For the `ranger` engine, the [default](https://parsnip.tidymodels.org/reference/details_rand_forest_ranger.html) is `floor(sqrt(ncol(x)))`.
+Quando usamos o `engine` (algoritmo/método) `ranger`, o [default](https://parsnip.tidymodels.org/reference/details_rand_forest_ranger.html) é `floor(sqrt(ncol(x)))`.
 
-Let's use cross-validation to tune this parameter.
+Vamos usar a validação cruzada para fazer o "ajuste fino" desse hiperparâmetro.
 
-We start by specifying the model and including `tune()`:
-
+Começamos especificando o modelo e incluindo `tune()`:
 ```{r}
 rf_spec <- rand_forest(trees = 1000,
                        mtry = tune()) %>%
@@ -890,16 +887,13 @@ rf_spec <- rand_forest(trees = 1000,
 rf_spec
 ```
 
-The workflow:
-
+O *workflow*:
 ```{r}
 rf_wf <- workflow(Diabetic ~ ., rf_spec)
 rf_wf
 ```
 
-
-Let's use `tune_grid()` to evaluate the performance for multiple values of the hyperparameter using cross-validation:
-
+Vamos usar `tune_grid()` para avaliar o desempenho de múltiplos valores do hiperparâmetro usando validação cruzada:
 ```{r}
 set.seed(2024)
 rf_res <-
@@ -910,8 +904,8 @@ rf_res <-
 ```
 
 
-Resulting metrics from cross-validation considering the grid values:
 
+Métricas resultantes da validação cruzada considerando os valores no `grid`:
 ```{r}
 rf_res %>% collect_metrics()
 ```
@@ -921,26 +915,24 @@ rf_res %>% collect_metrics()
 autoplot(rf_res)
 ```
 
-
-The best result from cross-validation, considering the accuracy metric:
+O melhor resultado da validação cruzada, considerando a acurácia como métrica:
 ```{r}
 show_best(rf_res, metric = "accuracy", n = 1)
 ```
 
-## Fitting the chosen tuned model
+## Ajustando o modelo final (após *tuning*)
 
 
-Let's assume, for instance, that between the four options (polynomial logistic regression, LASSO, decision tree and random forest), we decide to use the best tuned LASSO logistic regression. 
+Vamos supor, por exemplo, que entre as quatro opções (regressão logística polinomial, LASSO, árvore de decisão e floresta aleatória), decidimos usar a regressão logística LASSO com melhor desempenho após a escolha do hiperparâmetro (*tuning*).
 
-We then need to select the model with the best performing hyperparameter, we do so by using the `select_best()` function:
-
+Precisamos então selecionar o modelo com o hiperparâmetro de melhor desempenho, usando a função `select_best()`:
 ```{r}
  best_acc <- select_best(logreglasso_res, metric = "accuracy")
  best_acc
 ```
 
-To adjust the final model, we take the desired workflow (`logregpol_wf` in this example) and use the function `finalize_workflow()` to specify the best performing hyperparameter. The function `last_fit()` fits this final model with the training data and evaluates the performance on the test data.
 
+Para ajustar o modelo final, pegamos o *workflow* desejado (`logregpol_wf` neste exemplo) e usamos a função `finalize_workflow()` para especificar o hiperparâmetro com melhor desempenho. A função `last_fit()` ajusta este modelo final com os dados de treinamento e avalia o desempenho nos dados de teste.
 ```{r}
 final_lasso_fit <- logreglasso_wf %>% 
    finalize_workflow(best_acc) %>%
@@ -950,37 +942,31 @@ final_lasso_fit
 
 
 
-Results on test set:
-
+Resultados no conjunto de teste:
 ```{r}
 final_lasso_fit %>% collect_metrics()
 ```
 
 
-
-For the selected final *workflow*, we can save all final adjustment steps (obtained using the training set):
-
+Para o *workflow* final selecionado, podemos salvar todas as etapas de ajuste final (obtidas usando o conjunto de treinamento):
 ```{r}
 fitted_wf <- extract_workflow(final_lasso_fit)
 fitted_wf
 ```
 
-Get predicted values for the test data:
+Obtenha valores preditos para os dados de teste:
 ```{r}
 fitted_wf %>% augment(diabetes_test)
 ```
 
-
-Results on the train set:
-
+Resultados no conjunto de treinamento:
 ```{r}
 fitted_wf %>% 
   augment(diabetes_train) %>% 
   metrics(truth = Diabetic, estimate = .pred_class)
 ```
 
-To obtain the estimates of the model:
-
+Para obter as estimativas do modelo:
 ```{r}
 final_lasso_fit %>%
   extract_fit_parsnip() %>%
@@ -995,9 +981,7 @@ final_lasso_fit %>%
 
 ![](https://static1.colliderimages.com/wordpress/wp-content/uploads/2022/04/Everything-Everywhere-All-At-Once-Action-Movie-Climax-feature.jpg)
 
-
-We can define a set of workflows and then evaluate it using `tune_grid`.
-
+Podemos definir um conjunto de *workflows* e então avaliá-lo usando `tune_grid`.
 ```{r}
 wf_tune_set <- workflow_set(preproc = list(rec1 = Diabetic ~ ., 
                                            rec2 = diabetes_rec,
@@ -1077,11 +1061,12 @@ Para o *workflow* final selecionado, salvamos todas as etapas de ajuste final (o
 ```{r}
 fitted_wf <- extract_workflow(final_wf_fit)
 fitted_wf
+
+saveRDS(fitted_wf, "diabetes_rf_modelo.rds")
 ```
 
 Valores preditos para o conjunto de teste:
 ```{r}
-#predict(fitted_wf, diabetes_test[1:3,])
 final_wf_fit %>% augment()
 ```
 
@@ -1101,8 +1086,41 @@ final_wf_fit %>%
 ```
 
 
-@Sharika2021 apresenta e discute a aplicação de outros algoritmos para este conjunto de dados. 
+# Predição para novos dados
 
+Com o modelo final escolhido e salvo, podemos utilizá-lo na predição de `Diabetic` quando tivermos acesso às variáveis preditoras de novos pacientes.
+
+
+Para carregar o modelo salvo:
+
+````{r}
+modelo_final <- readRDS("diabetes_rf_modelo.rds")
+````
+
+Preparando os dados de dois novos pacientes, por exemplo:
+```{r}
+novos_pacientes <- tibble(Pregnancies = c(1, 2),
+                        PlasmaGlucose = c(100, 180),
+                        DiastolicBloodPressure = c(30, 80),
+                        TricepsThickness = c( 15, 42),
+                        SerumInsulin = c(39, 180),
+                        BMI = c(25, 39),
+                        DiabetesPedigree = c(0.15, 0.60),
+                        Age = c(30, 50))
+
+novos_pacientes
+```
+
+e acrescentar as colunas com as predições (tanto de classe quanto de probabilidade para cada classe):
+
+```{r}
+bind_cols(
+  novos_pacientes,
+  predict(modelo_final, new_data = novos_pacientes, type = "class"),
+  predict(modelo_final, new_data = novos_pacientes, type = "prob")
+)
+
+```
 
 
 # Referências
