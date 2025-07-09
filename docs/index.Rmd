@@ -26,7 +26,7 @@ layout: html_document
 
 Slides do minicurso ministrado durante o [I Congresso do IMECC](https://congresso2025imecc.ime.unicamp.br) nos dias 10 e 11 de Julho de 2025:
 
-[01- Introdução](https://drive.google.com/file/d/1vcyH3SrfQgFo2HH7c3L80kD6DBIOlEbt/view?usp=sharing)
+[01- Introdução](https://drive.google.com/file/d/1bsFonV_1GhiQmm4H1P6CRf10ID1G0bwh/view?usp=sharing)
 
 [02 - Estrutura dos Tidymodels](https://drive.google.com/file/d/1_xAuNr-zDlBQjDr3yfReDXZ1l1sVMT7O/view?usp=sharing)
 
