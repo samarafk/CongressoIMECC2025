@@ -6,3 +6,6 @@ Site do evento: <https://congresso2025imecc.ime.unicamp.br>
 Versão web:
 
 <https://samarafk.github.io/CongressoIMECC2025/>
+
+
+https://doi.org/10.5281/zenodo.20754620
